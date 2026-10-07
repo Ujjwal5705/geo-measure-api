@@ -1,13 +1,14 @@
 """Geometry measurement: area for polygons, length for lines, nothing for points."""
+
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
 
+import numpy as np
 import shapely
 from pyproj import CRS
 from shapely.geometry.base import BaseGeometry
-from shapely.ops import transform
 
 from app.services import crs as crs_utils
 
@@ -31,7 +32,9 @@ class MeasurementResult:
     warnings: list[str] = field(default_factory=list)
 
 
-def measure_geometry(geom: BaseGeometry | None, src_crs: CRS | None) -> MeasurementResult:
+def measure_geometry(
+    geom: BaseGeometry | None, src_crs: CRS | None
+) -> MeasurementResult:
     """Never raises: any failure is reported through the returned status."""
     try:
         return _measure(geom, src_crs)
@@ -48,7 +51,8 @@ def _measure(geom: BaseGeometry | None, src_crs: CRS | None) -> MeasurementResul
         return MeasurementResult(NOT_APPLICABLE, warnings=[])
     if gtype not in POLYGONAL | LINEAR:
         return MeasurementResult(
-            UNSUPPORTED, warnings=[f"Measurement is not supported for geometry type '{gtype}'."]
+            UNSUPPORTED,
+            warnings=[f"Measurement is not supported for geometry type '{gtype}'."],
         )
     if src_crs is None:
         return MeasurementResult(ERROR, warnings=["Unknown CRS; cannot measure."])
@@ -56,24 +60,36 @@ def _measure(geom: BaseGeometry | None, src_crs: CRS | None) -> MeasurementResul
     geom = shapely.force_2d(geom)  # altitude never contributes to planar area/length
     warnings: list[str] = []
     if gtype in POLYGONAL and not geom.is_valid:
-        warnings.append("Polygon geometry is invalid (e.g. self-intersection); area may be unreliable.")
+        warnings.append(
+            "Polygon geometry is invalid (e.g. self-intersection); area may be unreliable."
+        )
 
     lonlat = _to_wgs84(geom, src_crs)
     _assert_finite(lonlat)
     centroid = lonlat.centroid
     lon, lat = centroid.x, centroid.y
     if not (-180 <= lon <= 180 and -90 <= lat <= 90):
-        raise ValueError(f"Coordinates fall outside the valid lon/lat range ({lon:.3f}, {lat:.3f}).")
+        raise ValueError(
+            f"Coordinates fall outside the valid lon/lat range ({lon:.3f}, {lat:.3f})."
+        )
 
     if gtype in POLYGONAL:
         target = crs_utils.laea_crs(lon, lat)
         projected = _project(lonlat, crs_utils.WGS84, target)
-        value, mtype, method = projected.area, "area", "Lambert azimuthal equal-area centred on feature centroid"
+        value, mtype, method = (
+            projected.area,
+            "area",
+            "Lambert azimuthal equal-area centred on feature centroid",
+        )
         label = "custom LAEA " + f"(lon_0={round(lon, 1)}, lat_0={round(lat, 1)})"
     else:
         target = CRS.from_epsg(crs_utils.utm_epsg(lon, lat))
         projected = _project(lonlat, crs_utils.WGS84, target)
-        value, mtype, method = projected.length, "length", "UTM zone of feature centroid"
+        value, mtype, method = (
+            projected.length,
+            "length",
+            "UTM zone of feature centroid",
+        )
         label = crs_utils.describe_crs(target)
 
     if not math.isfinite(value):
@@ -88,7 +104,14 @@ def _to_wgs84(geom: BaseGeometry, src: CRS) -> BaseGeometry:
 
 
 def _project(geom: BaseGeometry, src: CRS, dst: CRS) -> BaseGeometry:
-    return transform(crs_utils.get_transformer(src, dst).transform, geom)
+    """Reproject a 2D geometry (vectorised; geometry must already be 2D)."""
+    transformer = crs_utils.get_transformer(src, dst)
+
+    def _fn(coords: np.ndarray) -> np.ndarray:
+        x, y = transformer.transform(coords[:, 0], coords[:, 1])
+        return np.column_stack([x, y])
+
+    return shapely.transform(geom, _fn)
 
 
 def _assert_finite(geom: BaseGeometry) -> None:

@@ -1,10 +1,24 @@
 import pytest
 from pyproj import CRS, Geod, Transformer
-from shapely.geometry import GeometryCollection, LineString, MultiPolygon, Point, Polygon, box
-from shapely.ops import transform
+from shapely.geometry import (
+    GeometryCollection,
+    LineString,
+    MultiPolygon,
+    Point,
+    Polygon,
+    box,
+)
+import numpy as np
+import shapely
 
 from app.services.crs import utm_epsg
-from app.services.measure import ERROR, MEASURED, NOT_APPLICABLE, UNSUPPORTED, measure_geometry
+from app.services.measure import (
+    ERROR,
+    MEASURED,
+    NOT_APPLICABLE,
+    UNSUPPORTED,
+    measure_geometry,
+)
 
 WGS84 = CRS.from_epsg(4326)
 GEOD = Geod(ellps="WGS84")
@@ -12,7 +26,12 @@ GEOD = Geod(ellps="WGS84")
 
 def _to_4326(geom, epsg):
     t = Transformer.from_crs(epsg, 4326, always_xy=True)
-    return transform(t.transform, geom)
+
+    def fn(c):
+        x, y = t.transform(c[:, 0], c[:, 1])
+        return np.column_stack([x, y])
+
+    return shapely.transform(geom, fn)
 
 
 def test_polygon_area_matches_known_square():
@@ -20,12 +39,18 @@ def test_polygon_area_matches_known_square():
     square = _to_4326(box(500_000, 2_500_000, 501_000, 2_501_000), 32643)
     r = measure_geometry(square, WGS84)
     assert r.status == MEASURED and r.type == "area"
-    assert r.value == pytest.approx(1_000_000, rel=2e-3)  # UTM scale factor ~0.9996 => ~0.08%
+    assert r.value == pytest.approx(
+        1_000_000, rel=2e-3
+    )  # UTM scale factor ~0.9996 => ~0.08%
 
 
-@pytest.mark.parametrize("lon,lat", [(75.86, 22.72), (-122.4, 37.8), (151.2, -33.9), (10, 70), (0, 89.5)])
+@pytest.mark.parametrize(
+    "lon,lat", [(75.86, 22.72), (-122.4, 37.8), (151.2, -33.9), (10, 70), (0, 89.5)]
+)
 def test_polygon_area_agrees_with_geodesic(lon, lat):
-    poly = Polygon([(lon, lat), (lon + 0.05, lat), (lon + 0.05, lat + 0.03), (lon, lat + 0.03)])
+    poly = Polygon(
+        [(lon, lat), (lon + 0.05, lat), (lon + 0.05, lat + 0.03), (lon, lat + 0.03)]
+    )
     expected = abs(GEOD.geometry_area_perimeter(poly)[0])
     r = measure_geometry(poly, WGS84)
     assert r.value == pytest.approx(expected, rel=1e-3)
@@ -55,7 +80,9 @@ def test_multipolygon_and_z_values():
     mp = MultiPolygon([box(75, 22, 75.01, 22.01), box(75.1, 22, 75.11, 22.01)])
     single = measure_geometry(box(75, 22, 75.01, 22.01), WGS84).value
     assert measure_geometry(mp, WGS84).value == pytest.approx(2 * single, rel=1e-3)
-    p3d = Polygon([(75, 22, 500), (75.01, 22, 500), (75.01, 22.01, 900), (75, 22.01, 900)])
+    p3d = Polygon(
+        [(75, 22, 500), (75.01, 22, 500), (75.01, 22.01, 900), (75, 22.01, 900)]
+    )
     assert measure_geometry(p3d, WGS84).status == MEASURED
 
 
@@ -73,7 +100,9 @@ def test_unsupported_and_missing_geometry_are_graceful():
 
 def test_bad_inputs_become_error_not_exception():
     assert measure_geometry(box(0, 0, 1, 1), None).status == ERROR
-    assert measure_geometry(box(500, 500, 600, 600), WGS84).status == ERROR  # impossible lon/lat
+    assert (
+        measure_geometry(box(500, 500, 600, 600), WGS84).status == ERROR
+    )  # impossible lon/lat
 
 
 def test_invalid_polygon_emits_warning():
