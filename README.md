@@ -6,12 +6,14 @@ A FastAPI backend that accepts a **zipped Shapefile** or a **KML**, extracts eve
 
 ## Setup
 
-Requires Python 3.10+ (developed on 3.12). Wheels for `geopandas`, `pyogrio`, `shapely` and
+Requires **Python 3.10+** (tested on 3.11 and 3.12). Wheels for `geopandas`, `pyogrio`, `shapely` and
 `pyproj` bundle GDAL/PROJ, so no system GDAL install is needed.
 
 ```bash
-unzip geo_measure_api.zip && cd geo_measure_api
-python -m venv .venv
+git clone https://github.com/Ujjwal5705/geo-measure-api.git
+cd geo-measure-api
+
+python3 -m venv .venv
 source .venv/bin/activate            # Windows: .venv\Scripts\activate
 pip install -r requirements-dev.txt  # use requirements.txt if you don't need tests
 
@@ -19,8 +21,22 @@ uvicorn app.main:app --reload        # http://127.0.0.1:8000
 ```
 
 * Interactive docs (Swagger UI): http://127.0.0.1:8000/docs
-* Run tests: `pytest -q`
+* Run tests: `python -m pytest -q` (28 tests: measurement accuracy against geodesic calculations, CRS handling, API behaviour, error cases)
 * Docker alternative: `docker build -t geo-api . && docker run -p 8000:8000 geo-api`
+
+**Try it in 30 seconds** (server running, from the project root):
+
+```bash
+curl -F "file=@samples/survey.kml" http://127.0.0.1:8000/api/files/              # note the returned "id"
+curl http://127.0.0.1:8000/api/files/<id>/
+curl http://127.0.0.1:8000/api/files/<id>/measurements/ | python3 -m json.tool
+curl -F "file=@samples/survey_wgs84.zip" http://127.0.0.1:8000/api/files/        # zipped shapefiles
+```
+
+**Troubleshooting**
+* `python --version` must be 3.10 or newer *inside the activated venv*. If it is older, recreate the venv with
+  a newer interpreter (e.g. `python3.11 -m venv .venv`).
+* Use `python -m pytest` rather than bare `pytest` so tests run with the venv's interpreter and packages.
 
 Data (SQLite DB + uploaded files) is stored in `./data`. Configuration via environment variables:
 
@@ -106,7 +122,9 @@ app/
   models.py          SQLAlchemy: UploadedFile, Feature
   schemas.py         Pydantic response models
 tests/               unit tests (measurement accuracy vs. geodesic) + API tests
-samples/             sample inputs and generator script
+samples/             sample inputs and generator script (samples/make_samples.py)
+Dockerfile           container image for the API
+pytest.ini           test configuration
 ```
 
 **File-processing flow**
@@ -123,7 +141,7 @@ samples/             sample inputs and generator script
 **Measurement flow**
 `geometry -> classify` (Polygon/MultiPolygon -> area, LineString/MultiLineString -> length,
 Point/MultiPoint -> nothing, anything else -> `UNSUPPORTED`) `-> drop Z -> normalise to WGS84 ->
-pick local projected CRS from centroid -> project -> shapely .area / .length`.
+pick local projected CRS from centroid -> project (vectorised `shapely.transform`) -> shapely .area / .length`.
 
 **CRS handling**
 * The file CRS is read from `.prj` (shapefile) or assumed WGS84 (KML). Geometry is returned in its native CRS.
@@ -163,6 +181,8 @@ invalid polygons are measured as-is with a warning rather than repaired.
   planar measurement.
 * Validating against an independent geodesic calculation (`pyproj.Geod`) caught my own wrong test
   expectations and is a much stronger check than comparing against a hand-computed constant.
+* Geospatial libraries evolve quickly: running the tests on a fresh clone with newer dependency versions surfaced a
+  deprecated Shapely API (`shapely.ops.transform`), which is now replaced by the vectorised `shapely.transform`.
 * Equal-area vs. conformal is a genuine trade-off; one "universal" projected CRS is rarely the best for both
   area and length.
 
@@ -173,4 +193,10 @@ invalid polygons are measured as-is with a warning rather than repaired.
 * Geodesic (ellipsoidal) measurements as an alternative/cross-check mode, and perimeter for polygons.
 * Geometry repair (`make_valid`), antimeridian splitting, and 3D length.
 * Spatial indexing (PostGIS) for bounding-box queries; vector-tile / GeoJSON export of results.
-* Authentication, per-user storage, rate limiting, Alembic migrations, CI pipeline.
+* Authentication, per-user storage, rate limiting and Alembic migrations.
+* CI: a GitHub Actions workflow running the test-suite on every push (Python 3.10-3.12 matrix).
+* Pin dependency versions with a lock file for fully reproducible installs.
+
+---
+
+Author: **Ujjwal Sharma**
