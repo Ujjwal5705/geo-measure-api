@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>Indore survey</name>
+    <Folder>
+      <name>Plots</name>
+      <Placemark>
+        <name>Plot A</name>
+        <description>Residential plot</description>
+        <Polygon><outerBoundaryIs><LinearRing><coordinates>
+          75.8577,22.7196,0 75.8667,22.7196,0 75.8667,22.7286,0 75.8577,22.7286,0 75.8577,22.7196,0
+        </coordinates></LinearRing></outerBoundaryIs></Polygon>
+      </Placemark>
+      <Placemark>
+        <name>Road 1</name>
+        <LineString><coordinates>75.85,22.70,0 75.86,22.71,0 75.88,22.72,0</coordinates></LineString>
+      </Placemark>
+      <Placemark>
+        <name>Survey point</name>
+        <Point><coordinates>75.8577,22.7196,0</coordinates></Point>
+      </Placemark>
+    </Folder>
+  </Document>
+</kml>
